@@ -10,9 +10,10 @@ Ferramenta offline para transcrever vídeos de processos e extrair frames automa
 
 Muitas vezes temos gravações de processos — como um fluxo dentro de um sistema — onde alguém explica em voz o que está fazendo na tela. O **Transkriptor** resolve o problema de enviar esse vídeo para uma IA analisar, já que ferramentas como o Claude ainda não aceitam vídeo diretamente.
 
-O script faz duas coisas:
+O script faz três coisas:
 1. **Extrai frames** do vídeo em intervalos regulares (prints das telas)
 2. **Transcreve o áudio** completamente offline, sem enviar nada para a internet
+3. **Identifica quem está falando** em cada trecho (Falante 1, Falante 2...) — *opcional*, útil para reuniões com várias pessoas
 
 Com esses dois insumos em mãos, você envia para o Claude e pede o que precisar: documentação, passo a passo, requisitos funcionais, manual do usuário, etc.
 
@@ -62,6 +63,42 @@ pip3 install openai-whisper opencv-python pillow tqdm
 
 ---
 
+### 4. pyannote (opcional — identificação de falantes)
+> Só é necessário se você for usar `DIARIZATION = True`. No padrão (`False`), a transcrição é feita só com o Whisper e você pode pular este passo e o próximo.
+
+O [pyannote](https://github.com/pyannote/pyannote-audio) é quem descobre **quem está falando** em cada trecho. Instale com:
+```bash
+pip3 install "pyannote.audio<4"
+```
+
+> ℹ️ O `<4` é proposital: a versão 4 do pyannote mudou a API e exige Python 3.10+. O script usa a versão 3.x.
+
+Confira se instalou (deve mostrar `Version: 3.x`):
+```bash
+pip3 show pyannote.audio
+```
+
+---
+
+### 5. Token do Hugging Face (opcional — para baixar os modelos do pyannote)
+Os modelos do pyannote (~30 MB) ficam no Hugging Face e exigem aceite dos termos de uso. **O token só é usado no primeiro download** — depois disso tudo roda offline.
+
+1. Crie uma conta em [huggingface.co](https://huggingface.co)
+2. Aceite os termos nas duas páginas (preencha o formulário e clique em *Agree and access repository*):
+   - [pyannote/segmentation-3.0](https://hf.co/pyannote/segmentation-3.0)
+   - [pyannote/speaker-diarization-3.1](https://hf.co/pyannote/speaker-diarization-3.1)
+3. Crie um token do tipo *Read* em [hf.co/settings/tokens](https://hf.co/settings/tokens)
+4. Salve o token no computador (cole o token quando for pedido):
+```bash
+python3 -c "from huggingface_hub import login; login()"
+```
+
+> Prefere não salvar? Rode `export HF_TOKEN=hf_seu_token_aqui` no mesmo terminal antes de rodar o script (vale só para aquela janela do terminal).
+
+Pronto: coloque `DIARIZATION = True` no `index.py` e, na primeira vez que rodar, os modelos são baixados automaticamente.
+
+---
+
 ## 🚀 Como usar
 
 ### 1. Clone ou baixe o projeto
@@ -96,7 +133,16 @@ output/
 ```
 
 ### 6. Envie para o Claude
-- Anexe o `transcricao.txt`
+- Anexe o `transcricao.txt`, que fica assim:
+  ```
+  [12.4s - 18.0s] Agora eu clico em "Novo pedido" e preencho o cliente.
+  [18.2s - 21.5s] E esse campo de prazo é obrigatório?
+  ```
+  Com `DIARIZATION = True`, cada trecho também indica quem falou:
+  ```
+  [12.4s - 18.0s] Falante 1: Agora eu clico em "Novo pedido" e preencho o cliente.
+  [18.2s - 21.5s] Falante 2: E esse campo de prazo é obrigatório?
+  ```
 - Anexe os frames mais relevantes
 - Diga o que quer: *"Gera uma documentação desse processo"*, *"Cria um passo a passo"*, *"Levanta os requisitos funcionais"*, etc.
 
@@ -162,6 +208,27 @@ Idioma do áudio. Ajuda o Whisper a ser mais preciso.
 
 ---
 
+```python
+DIARIZATION = False
+```
+Identifica quem está falando em cada trecho usando o pyannote.
+
+| Valor | Comportamento |
+|-------|---------------|
+| `False` | Padrão — transcrição só com o Whisper, sem identificar falantes (não precisa do pyannote) |
+| `True` | Identifica os falantes como `Falante 1`, `Falante 2`... na ordem em que falam pela primeira vez — basta dizer ao Claude quem é quem. Requer os passos [4](#4-pyannote-opcional--identificação-de-falantes) e [5](#5-token-do-hugging-face-opcional--para-baixar-os-modelos-do-pyannote) dos pré-requisitos |
+
+> No Mac com Apple Silicon usa a GPU (MPS) automaticamente. Leva cerca de 20% da duração do vídeo (ex: ~10 min para 50 min de vídeo).
+
+---
+
+```python
+NUM_SPEAKERS = None
+```
+Só vale com `DIARIZATION = True`. Quantidade de pessoas que falam no vídeo. Se você souber, informe (ex: `3`) — isso melhora a precisão. Com `None`, o número é detectado automaticamente.
+
+---
+
 ## 📁 Estrutura do projeto
 
 ```
@@ -177,13 +244,14 @@ transkriptor/
 
 ## 🔒 Privacidade
 
-Todo o processamento é feito **100% offline**, localmente na sua máquina. Nenhum dado do vídeo, áudio ou transcrição é enviado para a internet.
+Todo o processamento é feito **100% offline**, localmente na sua máquina. Nenhum dado do vídeo, áudio ou transcrição é enviado para a internet. A internet só é usada no primeiro uso, para baixar os modelos do Whisper (e do pyannote, se `DIARIZATION = True`).
 
 ---
 
 ## 🛠️ Tecnologias utilizadas
 
 - [Whisper (OpenAI)](https://github.com/openai/whisper) — transcrição de áudio offline
+- [pyannote.audio](https://github.com/pyannote/pyannote-audio) — identificação de falantes (diarização)
 - [OpenCV](https://opencv.org/) — extração de frames do vídeo
 - [tqdm](https://github.com/tqdm/tqdm) — barra de progresso no terminal
 - [FFmpeg](https://ffmpeg.org/) — processamento de áudio/vídeo
